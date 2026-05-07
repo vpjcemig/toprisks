@@ -903,11 +903,17 @@ function nutLoadItems() {
 function nutSaveItem(payload) {
   // ── Google Sheets backend ────────────────────────────────────────
   if (NUT_USE_GS) {
-    return fetch(NUT_APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ action: 'add', item: payload })
-    })
+    var params = new URLSearchParams({
+      action: 'add',
+      nome: payload.nome,
+      supt: payload.supt,
+      gerencia: payload.gerencia || '',
+      tipo: payload.tipo,
+      assunto: payload.assunto,
+      desc: payload.desc || '',
+      prioridade: payload.prioridade
+    });
+    return fetch(NUT_APPS_SCRIPT_URL + '?' + params.toString())
     .then(function(r){ return r.json(); })
     .then(function(d){
       if (!d.ok) throw new Error(d.error || 'Erro desconhecido');
@@ -956,11 +962,8 @@ function nutSaveItem(payload) {
 function nutDeleteItem(id) {
   // ── Google Sheets backend ────────────────────────────────────────
   if (NUT_USE_GS) {
-    return fetch(NUT_APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ action: 'delete', id: id })
-    })
+    var params = new URLSearchParams({ action: 'delete', id: id });
+    return fetch(NUT_APPS_SCRIPT_URL + '?' + params.toString())
     .then(function(r){ return r.json(); })
     .then(function(d){
       if (!d.ok) throw new Error(d.error || 'Erro ao remover');
