@@ -793,13 +793,19 @@ var NUT_SUPT_LABELS = {
   GC:  'Superintendência Jurídica de Governança Corporativa'
 };
 
-// SP config
+// ── CONFIGURAÇÃO DO BACKEND (Google Sheets via Apps Script) ──────────
+// Após criar o Apps Script (veja instruções abaixo), cole a URL aqui:
+var NUT_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwIpKsi9oDGWVTknFMMI7Vi8ByTLPb0Fb44qltjzq94eGYxtih_MYXMKFR03HBrW-HbEg/exec';
+// ─────────────────────────────────────────────────────────────────────
+
+// SP config (mantido para compatibilidade futura)
 var NUT_SP_LIST = 'PautaNUT';
-// Detect SP by URL — works inside iframes where _spPageContextInfo is unavailable
 var NUT_IS_SP = (window.location.hostname.indexOf('sharepoint.com') >= 0 || window.location.hostname.indexOf('mcas.ms') >= 0);
-// Extract site URL: take everything up to /sites/SiteName
 var _nutUrlMatch = window.location.href.match(/(https?:\/\/[^\/]+\/sites\/[^\/]+)/) || window.location.href.match(/(https?:\/\/[^\/]+)/); if(NUT_IS_SP && _nutUrlMatch && _nutUrlMatch[1].indexOf('/sites/') < 0) { _nutUrlMatch = ['','https://cemigbr.sharepoint.com/sites/Juridico']; }
 var NUT_SP_SITE  = _nutUrlMatch ? _nutUrlMatch[1] : 'https://cemigbr.sharepoint.com/sites/Juridico';
+
+// Usa Apps Script se a URL foi configurada, senão cai no SharePoint ou localStorage
+var NUT_USE_GS = (NUT_APPS_SCRIPT_URL && NUT_APPS_SCRIPT_URL.indexOf('script.google.com') >= 0);
 
 var nutItems        = [];
 var nutActiveFilter = 'todos';
@@ -847,99 +853,140 @@ function nutGetDigest() {
 }
 
 function nutLoadItems() {
-  if (!NUT_IS_SP) {
-    nutItems = JSON.parse(localStorage.getItem('nutVpjItems') || '[]');
-    nutRender();
+  // ── Google Sheets backend ────────────────────────────────────────
+  if (NUT_USE_GS) {
+    fetch(NUT_APPS_SCRIPT_URL + '?action=list')
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      nutItems = (d.items || []);
+      nutRender();
+    })
+    .catch(function(e) {
+      nutShowToast('Erro ao carregar dados do servidor.', true);
+      console.error(e);
+    });
     return;
   }
-  fetch(NUT_SP_SITE + "/_api/web/lists/getbytitle('" + NUT_SP_LIST + "')/items?$orderby=Created desc&$top=500",
-    { headers: { 'Accept': 'application/json;odata=verbose' }, credentials: 'include' }
-  )
-  .then(function(r){ return r.json(); })
-  .then(function(d) {
-    nutItems = (d.d.results || []).map(function(i) {
-      return {
-        id:        i.ID,
-        nome:      i.NomeAutor || '',
-        supt:      i.Superintendencia || '',
-        gerencia:  i.Gerencia || '',
-        tipo:      i.TipoRisco || '',
-        assunto:   i.Title || '',
-        desc:      i.Descricao || '',
-        prioridade:i.Prioridade || '',
-        data:      new Date(i.Created).toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'})
-      };
+  // ── SharePoint ──────────────────────────────────────────────────
+  if (NUT_IS_SP) {
+    fetch(NUT_SP_SITE + "/_api/web/lists/getbytitle('" + NUT_SP_LIST + "')/items?$orderby=Created desc&$top=500",
+      { headers: { 'Accept': 'application/json;odata=verbose' }, credentials: 'include' }
+    )
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      nutItems = (d.d.results || []).map(function(i) {
+        return {
+          id:        i.ID,
+          nome:      i.NomeAutor || '',
+          supt:      i.Superintendencia || '',
+          gerencia:  i.Gerencia || '',
+          tipo:      i.TipoRisco || '',
+          assunto:   i.Title || '',
+          desc:      i.Descricao || '',
+          prioridade:i.Prioridade || '',
+          data:      new Date(i.Created).toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'})
+        };
+      });
+      nutRender();
+    })
+    .catch(function(e) {
+      nutShowToast('Erro ao carregar dados. Verifique a lista PautaNUT.', true);
+      console.error(e);
     });
-    nutRender();
-  })
-  .catch(function(e) {
-    nutShowToast('Erro ao carregar dados. Verifique a lista PautaNUT.', true);
-    console.error(e);
-  });
+    return;
+  }
+  // ── Fallback: localStorage (apenas local, não compartilhado) ────
+  nutItems = JSON.parse(localStorage.getItem('nutVpjItems') || '[]');
+  nutRender();
 }
 
 function nutSaveItem(payload) {
-  if (!NUT_IS_SP) {
-    payload.id   = Date.now();
-    payload.data = new Date().toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'});
-    nutItems.unshift(payload);
-    localStorage.setItem('nutVpjItems', JSON.stringify(nutItems));
-    nutRender();
-    return Promise.resolve();
-  }
-  return nutGetDigest().then(function(digest) {
-    console.log('NUT: posting to', NUT_SP_SITE, 'list', NUT_SP_LIST, 'IS_SP:', NUT_IS_SP);
-    return fetch(
-      NUT_SP_SITE + "/_api/web/lists/getbytitle('" + NUT_SP_LIST + "')/items",
-      {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Accept':          'application/json;odata=verbose',
-          'Content-Type':    'application/json;odata=verbose',
-          'X-RequestDigest': digest
-        },
-        body: JSON.stringify({
-          '__metadata':      { 'type': 'SP.Data.' + NUT_SP_LIST + 'ListItem' },
-          'Title':           payload.assunto,
-          'NomeAutor':       payload.nome,
-          'Superintendencia':payload.supt,
-          'Gerencia':        payload.gerencia,
-          'TipoRisco':       payload.tipo,
-          'Descricao':       payload.desc,
-          'Prioridade':      payload.prioridade
-        })
-      }
-    );
-  }).then(function(r) {
-    console.log('NUT: save response status', r.status);
-    if (!r.ok) return r.text().then(function(t){
-      console.error('NUT: save error body:', t);
-      throw new Error('HTTP ' + r.status + ': ' + t.substring(0,200));
+  // ── Google Sheets backend ────────────────────────────────────────
+  if (NUT_USE_GS) {
+    return fetch(NUT_APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ action: 'add', item: payload })
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) throw new Error(d.error || 'Erro desconhecido');
     });
-  });
+  }
+  // ── SharePoint ──────────────────────────────────────────────────
+  if (NUT_IS_SP) {
+    return nutGetDigest().then(function(digest) {
+      return fetch(
+        NUT_SP_SITE + "/_api/web/lists/getbytitle('" + NUT_SP_LIST + "')/items",
+        {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Accept':          'application/json;odata=verbose',
+            'Content-Type':    'application/json;odata=verbose',
+            'X-RequestDigest': digest
+          },
+          body: JSON.stringify({
+            '__metadata':      { 'type': 'SP.Data.' + NUT_SP_LIST + 'ListItem' },
+            'Title':           payload.assunto,
+            'NomeAutor':       payload.nome,
+            'Superintendencia':payload.supt,
+            'Gerencia':        payload.gerencia,
+            'TipoRisco':       payload.tipo,
+            'Descricao':       payload.desc,
+            'Prioridade':      payload.prioridade
+          })
+        }
+      );
+    }).then(function(r) {
+      if (!r.ok) return r.text().then(function(t){
+        throw new Error('HTTP ' + r.status + ': ' + t.substring(0,200));
+      });
+    });
+  }
+  // ── Fallback localStorage ────────────────────────────────────────
+  payload.id   = Date.now();
+  payload.data = new Date().toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'});
+  nutItems.unshift(payload);
+  localStorage.setItem('nutVpjItems', JSON.stringify(nutItems));
+  nutRender();
+  return Promise.resolve();
 }
 
 function nutDeleteItem(id) {
-  if (!NUT_IS_SP) {
-    nutItems = nutItems.filter(function(i){ return i.id !== id; });
-    localStorage.setItem('nutVpjItems', JSON.stringify(nutItems));
-    nutRender();
-    return Promise.resolve();
+  // ── Google Sheets backend ────────────────────────────────────────
+  if (NUT_USE_GS) {
+    return fetch(NUT_APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ action: 'delete', id: id })
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (!d.ok) throw new Error(d.error || 'Erro ao remover');
+    });
   }
-  return nutGetDigest().then(function(digest) {
-    return fetch(
-      NUT_SP_SITE + "/_api/web/lists/getbytitle('" + NUT_SP_LIST + "')/items(" + id + ")",
-      {
-        method: 'DELETE',
-        headers: {
-          'Accept':          'application/json;odata=verbose',
-          'X-RequestDigest': digest,
-          'IF-MATCH':        '*'
+  // ── SharePoint ──────────────────────────────────────────────────
+  if (NUT_IS_SP) {
+    return nutGetDigest().then(function(digest) {
+      return fetch(
+        NUT_SP_SITE + "/_api/web/lists/getbytitle('" + NUT_SP_LIST + "')/items(" + id + ")",
+        {
+          method: 'DELETE',
+          headers: {
+            'Accept':          'application/json;odata=verbose',
+            'X-RequestDigest': digest,
+            'IF-MATCH':        '*'
+          }
         }
-      }
-    );
-  });
+      );
+    });
+  }
+  // ── Fallback localStorage ────────────────────────────────────────
+  nutItems = nutItems.filter(function(i){ return i.id !== id; });
+  localStorage.setItem('nutVpjItems', JSON.stringify(nutItems));
+  nutRender();
+  return Promise.resolve();
 }
 
 // ── Form actions ──────────────────────────────────────────────────
@@ -968,7 +1015,7 @@ function nutSubmit() {
 
   nutSaveItem({ nome:nome, supt:supt, gerencia:gerencia, tipo:tipo, assunto:assunto, desc:desc, prioridade:prioridade })
   .then(function() {
-    return NUT_IS_SP ? nutLoadItems() : Promise.resolve(nutRender());
+    return (NUT_IS_SP || NUT_USE_GS) ? nutLoadItems() : Promise.resolve(nutRender());
   })
   .then(function() {
     nutClearForm();
@@ -987,7 +1034,7 @@ function nutConfirmDelete(id) {
   if (!confirm('Remover este item da pauta?')) return;
   nutDeleteItem(id)
   .then(function() {
-    return NUT_IS_SP ? nutLoadItems() : Promise.resolve(nutRender());
+    return (NUT_IS_SP || NUT_USE_GS) ? nutLoadItems() : Promise.resolve(nutRender());
   })
   .then(function(){ nutShowToast('Item removido.'); })
   .catch(function(e){ nutShowToast('Erro ao remover.', true); console.error(e); });
