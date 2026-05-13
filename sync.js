@@ -1,95 +1,89 @@
 (function() {
   var GS_URL = 'https://script.google.com/macros/s/AKfycbwIpKsi9oDGWVTknFMMI7Vi8ByTLPb0Fb44qltjzq94eGYxtih_MYXMKFR03HBrW-HbEg/exec';
 
+  function val(id) {
+    var el = document.getElementById(id);
+    return el ? el.value.trim() : '';
+  }
+
   function init() {
     if (typeof nutRender === 'undefined') {
       setTimeout(init, 100);
       return;
     }
 
-    console.log('[sync.js] Iniciando...');
-
+    // Carrega itens do Sheets
     window.nutLoadItems = function() {
       fetch(GS_URL + '?action=list')
         .then(function(r) { return r.json(); })
         .then(function(d) {
-          console.log('[sync.js] Carregado:', d.items.length, 'itens');
           window.nutItems = d.items || [];
           window.nutRender();
+          console.log('[sync] carregado', window.nutItems.length, 'itens');
         })
-        .catch(function(e) { console.error('[sync.js] Erro load:', e); });
+        .catch(function(e) { console.error('[sync] erro load', e); });
     };
 
-    window.nutSaveItem = function(payload) {
-      var params = new URLSearchParams({
-        action: 'add',
-        nome: payload.nome || '',
-        supt: payload.supt || '',
-        gerencia: payload.gerencia || '',
-        tipo: payload.tipo || '',
-        assunto: payload.assunto || '',
-        desc: payload.desc || '',
-        prioridade: payload.prioridade || ''
-      });
-      console.log('[sync.js] Salvando:', payload.assunto);
-      return fetch(GS_URL + '?' + params.toString())
-        .then(function(r) { return r.json(); })
-        .then(function(d) {
-          console.log('[sync.js] Salvo:', d);
-          if (!d.ok) throw new Error(d.error || 'Erro ao salvar');
+    // Intercepta o botão submit diretamente
+    var btn = document.querySelector('button.btn-submit');
+    if (btn) {
+      // Clona para remover listeners antigos
+      var novo = btn.cloneNode(true);
+      btn.parentNode.replaceChild(novo, btn);
+
+      novo.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        var nome       = val('nome');
+        var supt       = val('supt');
+        var gerencia   = val('gerencia');
+        var tipo       = val('tipo');
+        var assunto    = val('assunto');
+        var desc       = val('desc');
+        var prioridade = val('prioridade');
+
+        console.log('[sync] tentando salvar:', assunto);
+
+        if (!nome || !supt || !tipo || !assunto || !prioridade) {
+          alert('Preencha todos os campos obrigatórios.');
+          return;
+        }
+
+        var params = new URLSearchParams({
+          action: 'add', nome: nome, supt: supt, gerencia: gerencia,
+          tipo: tipo, assunto: assunto, desc: desc, prioridade: prioridade
         });
-    };
 
-    window.nutDeleteItem = function(id) {
-      return fetch(GS_URL + '?action=delete&id=' + encodeURIComponent(id))
-        .then(function(r) { return r.json(); })
-        .then(function(d) {
-          if (!d.ok) throw new Error(d.error || 'Erro ao remover');
-        });
-    };
+        fetch(GS_URL + '?' + params.toString())
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            console.log('[sync] salvo:', d);
+            if (!d.ok) throw new Error(d.error);
+            window.nutLoadItems();
+            // Tenta fechar modal / limpar form como o código original faria
+            if (typeof nutCloseModal === 'function') nutCloseModal();
+            ['nome','supt','gerencia','tipo','assunto','desc','prioridade'].forEach(function(id) {
+              var el = document.getElementById(id);
+              if (el) el.value = '';
+            });
+          })
+          .catch(function(e) { console.error('[sync] erro save', e); alert('Erro: ' + e.message); });
+      }, true);
 
-    // Sobrescreve nutSubmit para garantir que usa o novo nutSaveItem
-    window.nutSubmit = function() {
-      var nome      = (document.getElementById('nome') || {}).value || '';
-      var supt      = (document.getElementById('supt') || {}).value || '';
-      var gerencia  = (document.getElementById('gerencia') || {}).value || '';
-      var tipo      = (document.getElementById('tipo') || {}).value || '';
-      var assunto   = (document.getElementById('assunto') || {}).value || '';
-      var desc      = (document.getElementById('desc') || {}).value || '';
-      var prioridade= (document.getElementById('prioridade') || {}).value || '';
+      console.log('[sync] botão interceptado');
+    } else {
+      console.warn('[sync] botão não encontrado');
+    }
 
-      if (!nome || !supt || !tipo || !assunto || !prioridade) {
-        alert('Preencha todos os campos obrigatórios.');
-        return;
-      }
-
-      window.nutSaveItem({ nome:nome, supt:supt, gerencia:gerencia, tipo:tipo, assunto:assunto, desc:desc, prioridade:prioridade })
-        .then(function() {
-          window.nutLoadItems();
-          // Fecha modal se existir
-          var modal = document.getElementById('modal');
-          if (modal) modal.style.display = 'none';
-          // Limpa formulário
-          ['nome','supt','gerencia','tipo','assunto','desc','prioridade'].forEach(function(id) {
-            var el = document.getElementById(id);
-            if (el) el.value = '';
-          });
-        })
-        .catch(function(e) {
-          console.error('[sync.js] Erro ao salvar:', e);
-          alert('Erro ao salvar: ' + e.message);
-        });
-    };
-
-    // Religa o botão de submit ao novo nutSubmit
-    var btnSubmit = document.querySelector('[onclick*="nutSubmit"]');
-    if (btnSubmit) {
-      btnSubmit.onclick = window.nutSubmit;
-      console.log('[sync.js] Botão submit religado.');
+    // Intercepta também o form caso exista
+    var form = document.querySelector('form');
+    if (form) {
+      form.addEventListener('submit', function(e) { e.preventDefault(); }, true);
     }
 
     window.nutLoadItems();
-    console.log('[sync.js] Pronto!');
+    console.log('[sync] pronto');
   }
 
   if (document.readyState === 'loading') {
