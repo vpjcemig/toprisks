@@ -6,13 +6,17 @@
     return el ? el.value.trim() : '';
   }
 
+  function radioVal(name) {
+    var el = document.querySelector('input[name="' + name + '"]:checked');
+    return el ? el.value : '';
+  }
+
   function init() {
     if (typeof nutRender === 'undefined') {
       setTimeout(init, 100);
       return;
     }
 
-    // Carrega itens do Sheets
     window.nutLoadItems = function() {
       fetch(GS_URL + '?action=list')
         .then(function(r) { return r.json(); })
@@ -24,10 +28,8 @@
         .catch(function(e) { console.error('[sync] erro load', e); });
     };
 
-    // Intercepta o botão submit diretamente
     var btn = document.querySelector('button.btn-submit');
     if (btn) {
-      // Clona para remover listeners antigos
       var novo = btn.cloneNode(true);
       btn.parentNode.replaceChild(novo, btn);
 
@@ -40,10 +42,10 @@
         var gerencia   = val('gerencia');
         var tipo       = val('tipo');
         var assunto    = val('assunto');
-        var desc       = val('desc');
-        var prioridade = val('prioridade');
+        var desc       = val('descricao');
+        var prioridade = radioVal('prioridade');
 
-        console.log('[sync] tentando salvar:', assunto);
+        console.log('[sync] salvando:', {nome, supt, tipo, assunto, prioridade});
 
         if (!nome || !supt || !tipo || !assunto || !prioridade) {
           alert('Preencha todos os campos obrigatórios.');
@@ -61,22 +63,27 @@
             console.log('[sync] salvo:', d);
             if (!d.ok) throw new Error(d.error);
             window.nutLoadItems();
-            // Tenta fechar modal / limpar form como o código original faria
             if (typeof nutCloseModal === 'function') nutCloseModal();
-            ['nome','supt','gerencia','tipo','assunto','desc','prioridade'].forEach(function(id) {
+            ['nome','assunto','descricao'].forEach(function(id) {
               var el = document.getElementById(id);
               if (el) el.value = '';
             });
+            document.querySelectorAll('input[name="prioridade"]').forEach(function(el) {
+              el.checked = false;
+            });
+            var sel = document.getElementById('supt');
+            if (sel) sel.selectedIndex = 0;
+            var sel2 = document.getElementById('gerencia');
+            if (sel2) sel2.selectedIndex = 0;
+            var sel3 = document.getElementById('tipo');
+            if (sel3) sel3.selectedIndex = 0;
           })
           .catch(function(e) { console.error('[sync] erro save', e); alert('Erro: ' + e.message); });
       }, true);
 
       console.log('[sync] botão interceptado');
-    } else {
-      console.warn('[sync] botão não encontrado');
     }
 
-    // Intercepta também o form caso exista
     var form = document.querySelector('form');
     if (form) {
       form.addEventListener('submit', function(e) { e.preventDefault(); }, true);
